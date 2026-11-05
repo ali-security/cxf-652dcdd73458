@@ -1,0 +1,146 @@
+name: seal-build
+
+# Authored for the sealed build: upstream Apache CXF 3.0.0-milestone1 ships no
+# GitHub Actions CI. Mirrors BUILDING.txt (`mvn` = compile + run all tests) on
+# the JDK the release was built with (Build-Jdk 1.6.0_33), scoped to cxf-core
+# plus the modules/system tests covering the paths later CVE patches touch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: "Optional surefire -Dtest selector; empty runs the full suites"
+        required: false
+        default: ""
+
+env:
+  MAVEN_OPTS: "-Xmx2g -XX:MaxPermSize=512m"
+  MVN_FLAGS: "-B -e -Dmaven.javadoc.skip=true -Dmaven.source.skip=true -Dgpg.skip=true -Dcheckstyle.skip=true -Dpmd.skip=true -Dcpd.skip=true"
+  MODULES: "rt/databinding/aegis,rt/frontend/jaxrs,rt/rs/client,rt/rs/extensions/providers,rt/rs/security/xml,rt/transports/http,rt/ws/rm,rt/ws/security,tools/common,tools/wsdlto/databinding/jaxb"
+
+jobs:
+  core-and-modules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Oracle JDK 1.6.0_45 (release was built on Oracle 1.6.0_33)
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -fsSLO https://repo.huaweicloud.com/java/jdk/6u45-b06/jdk-6u45-linux-x64.bin
+          echo "6b493aeab16c940cae9e3d07ad2a5c5684fb49cf06c5d44c400c7993db0d12e8  jdk-6u45-linux-x64.bin" | sha256sum -c -
+          chmod +x jdk-6u45-linux-x64.bin
+          ./jdk-6u45-linux-x64.bin < /dev/null > /dev/null
+          echo "JAVA_HOME=$RUNNER_TEMP/jdk1.6.0_45" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/jdk1.6.0_45/bin" >> "$GITHUB_PATH"
+
+      - name: Install Maven 3.2.5 and HTTP Central mirror
+        run: |
+          set -euo pipefail
+          curl -fsSL https://archive.apache.org/dist/maven/maven-3/3.2.5/binaries/apache-maven-3.2.5-bin.tar.gz | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/apache-maven-3.2.5/bin" >> "$GITHUB_PATH"
+          mkdir -p ~/.m2
+          cat > ~/.m2/settings.xml <<'EOF'
+          <settings>
+            <mirrors>
+              <mirror>
+                <id>central-http</id>
+                <mirrorOf>*</mirrorOf>
+                <url>http://insecure.repo1.maven.org/maven2</url>
+              </mirror>
+            </mirrors>
+          </settings>
+          EOF
+
+      - name: Build and test cxf-core
+        env:
+          TEST_FILTER: ${{ inputs.test-filter }}
+        run: |
+          set -euo pipefail
+          java -version
+          mvn -version
+          if [ -n "$TEST_FILTER" ]; then
+            mvn clean install -pl core $MVN_FLAGS -Dtest="$TEST_FILTER" -DfailIfNoTests=false
+          else
+            mvn clean install -pl core $MVN_FLAGS
+          fi
+
+      - name: Upload cxf-core jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: cxf-core
+          path: core/target/cxf-core-3.0.0-milestone1.jar
+          if-no-files-found: error
+
+      - name: Test modules covering patched paths (against the cxf-core just built)
+        env:
+          TEST_FILTER: ${{ inputs.test-filter }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TEST_FILTER" ]; then
+            mvn install -fae -pl "$MODULES" $MVN_FLAGS -Dtest="$TEST_FILTER" -DfailIfNoTests=false
+          else
+            mvn install -fae -pl "$MODULES" $MVN_FLAGS
+          fi
+
+      - name: Surefire summary
+        if: always()
+        run: python3 .github/workflows/seal-surefire-summary.py core rt tools
+
+  systests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Oracle JDK 1.6.0_45 (release was built on Oracle 1.6.0_33)
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -fsSLO https://repo.huaweicloud.com/java/jdk/6u45-b06/jdk-6u45-linux-x64.bin
+          echo "6b493aeab16c940cae9e3d07ad2a5c5684fb49cf06c5d44c400c7993db0d12e8  jdk-6u45-linux-x64.bin" | sha256sum -c -
+          chmod +x jdk-6u45-linux-x64.bin
+          ./jdk-6u45-linux-x64.bin < /dev/null > /dev/null
+          echo "JAVA_HOME=$RUNNER_TEMP/jdk1.6.0_45" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/jdk1.6.0_45/bin" >> "$GITHUB_PATH"
+
+      - name: Install Maven 3.2.5 and HTTP Central mirror
+        run: |
+          set -euo pipefail
+          curl -fsSL https://archive.apache.org/dist/maven/maven-3/3.2.5/binaries/apache-maven-3.2.5-bin.tar.gz | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/apache-maven-3.2.5/bin" >> "$GITHUB_PATH"
+          mkdir -p ~/.m2
+          cat > ~/.m2/settings.xml <<'EOF'
+          <settings>
+            <mirrors>
+              <mirror>
+                <id>central-http</id>
+                <mirrorOf>*</mirrorOf>
+                <url>http://insecure.repo1.maven.org/maven2</url>
+              </mirror>
+            </mirrors>
+          </settings>
+          EOF
+
+      - name: Install cxf-core, testutils and patched-path modules from source (tests run in the other job)
+        run: |
+          set -euo pipefail
+          mvn clean install -pl "core,testutils,$MODULES" $MVN_FLAGS -DskipTests
+
+      - name: System tests covering patched paths
+        env:
+          TEST_FILTER: ${{ inputs.test-filter }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TEST_FILTER" ]; then
+            mvn test -pl systests/jaxrs,systests/jaxws $MVN_FLAGS -Dtest="$TEST_FILTER" -DfailIfNoTests=false
+          else
+            mvn test -pl systests/jaxrs $MVN_FLAGS -Dtest=JAXRSClientServerSpringBookTest,JAXRSMultipartTest -DfailIfNoTests=false
+            mvn test -pl systests/jaxws $MVN_FLAGS -Dtest=ClientServerTest -DfailIfNoTests=false
+          fi
+
+      - name: Surefire summary
+        if: always()
+        run: python3 .github/workflows/seal-surefire-summary.py systests
