@@ -33,6 +33,8 @@ import javax.xml.validation.SchemaFactory;
     
 import org.w3c.dom.Document;
 import org.xml.sax.SAXException;
+import org.xml.sax.SAXNotRecognizedException;
+import org.xml.sax.SAXNotSupportedException;
 
 import org.apache.cxf.common.logging.LogUtils;
 
@@ -43,6 +45,12 @@ import org.apache.cxf.common.logging.LogUtils;
 public class ExtendedDocumentBuilder {
 
     private static final Logger LOG = LogUtils.getL7dLogger(ExtendedDocumentBuilder.class);
+
+    // XMLConstants.ACCESS_EXTERNAL_DTD / ACCESS_EXTERNAL_SCHEMA (JAXP 1.5, only defined from Java 7 on)
+    private static final String ACCESS_EXTERNAL_DTD =
+        "http://javax.xml.XMLConstants/property/accessExternalDTD";
+    private static final String ACCESS_EXTERNAL_SCHEMA =
+        "http://javax.xml.XMLConstants/property/accessExternalSchema";
 
     private final DocumentBuilderFactory parserFactory;
     private DocumentBuilder parser;
@@ -63,6 +71,32 @@ public class ExtendedDocumentBuilder {
     public void setValidating(boolean validate) {
         if (validate) {
             this.schemaFactory = SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI);
+            try {
+                schemaFactory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, Boolean.TRUE);
+            } catch (SAXNotRecognizedException e) {
+                LOG.log(Level.WARNING, "The property '" + XMLConstants.FEATURE_SECURE_PROCESSING
+                    + "' is not supported.");
+            } catch (SAXNotSupportedException e) {
+                LOG.log(Level.WARNING, "The property '" + XMLConstants.FEATURE_SECURE_PROCESSING
+                    + "' is not supported.");
+            }
+
+            try {
+                schemaFactory.setProperty(ACCESS_EXTERNAL_DTD, "");
+            } catch (SAXNotRecognizedException e) {
+                LOG.log(Level.WARNING, "The property '" + ACCESS_EXTERNAL_DTD + "' is not supported.");
+            } catch (SAXNotSupportedException e) {
+                LOG.log(Level.WARNING, "The property '" + ACCESS_EXTERNAL_DTD + "' is not supported.");
+            }
+
+            try {
+                schemaFactory.setProperty(ACCESS_EXTERNAL_SCHEMA, "");
+            } catch (SAXNotRecognizedException e) {
+                LOG.log(Level.WARNING, "The property '" + ACCESS_EXTERNAL_SCHEMA + "' is not supported.");
+            } catch (SAXNotSupportedException e) {
+                LOG.log(Level.WARNING, "The property '" + ACCESS_EXTERNAL_SCHEMA + "' is not supported.");
+            }
+
             try {
                 this.schema = schemaFactory.newSchema(new StreamSource(getSchemaLocation()));
             } catch (org.xml.sax.SAXException e) {

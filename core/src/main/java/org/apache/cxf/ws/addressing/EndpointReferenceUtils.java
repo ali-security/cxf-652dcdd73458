@@ -28,6 +28,8 @@ import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -60,6 +62,8 @@ import org.w3c.dom.ls.LSInput;
 import org.w3c.dom.ls.LSResourceResolver;
 
 import org.xml.sax.InputSource;
+import org.xml.sax.SAXNotRecognizedException;
+import org.xml.sax.SAXNotSupportedException;
 
 import org.apache.cxf.Bus;
 import org.apache.cxf.BusFactory;
@@ -211,7 +215,18 @@ public final class EndpointReferenceUtils {
                 systemId = publicId;
             }
             if (systemId != null) {
-                InputSource source = resolver.resolve(systemId, baseURI);
+                // Run inside doPrivileged so that sm.checkPermission() calls
+                // inside the resolver chain (SecurityActions.fileExists) stop
+                // at this boundary and check only CXF's own permissions rather
+                // than walking up through the JAXP schema-validator frames that
+                // lack CXF-internal permissions.
+                final String sid = systemId;
+                final String buri = baseURI;
+                InputSource source = AccessController.doPrivileged(new PrivilegedAction<InputSource>() {
+                    public InputSource run() {
+                        return resolver.resolve(sid, buri);
+                    }
+                });
                 if (source != null) {
                     impl = new LSInputImpl();
                     impl.setByteStream(source.getByteStream());
@@ -227,6 +242,15 @@ public final class EndpointReferenceUtils {
     public static final String ANONYMOUS_ADDRESS = "http://www.w3.org/2005/08/addressing/anonymous";
     
     private static final Logger LOG = LogUtils.getL7dLogger(EndpointReferenceUtils.class);
+
+    private static final String DISALLOW_DOCTYPE_DECL_FEATURE =
+        "http://apache.org/xml/features/disallow-doctype-decl";
+
+    // XMLConstants.ACCESS_EXTERNAL_DTD / ACCESS_EXTERNAL_SCHEMA (JAXP 1.5, only defined from Java 7 on)
+    private static final String ACCESS_EXTERNAL_DTD =
+        "http://javax.xml.XMLConstants/property/accessExternalDTD";
+    private static final String ACCESS_EXTERNAL_SCHEMA =
+        "http://javax.xml.XMLConstants/property/accessExternalSchema";
 
     private static final String NS_WSAW_2005 = "http://www.w3.org/2005/02/addressing/wsdl";
     private static final String WSDL_INSTANCE_NAMESPACE2 = 
@@ -566,6 +590,46 @@ public final class EndpointReferenceUtils {
         Schema schema = serviceInfo.getProperty(Schema.class.getName(), Schema.class);
         if (schema == null) {
             SchemaFactory factory = SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI);
+            try {
+                factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, Boolean.TRUE);
+            } catch (SAXNotRecognizedException e) {
+                LOG.log(Level.WARNING, "The property '" + XMLConstants.FEATURE_SECURE_PROCESSING
+                    + "' is not supported.");
+            } catch (SAXNotSupportedException e) {
+                LOG.log(Level.WARNING, "The property '" + XMLConstants.FEATURE_SECURE_PROCESSING
+                    + "' is not supported.");
+            }
+
+            try {
+                factory.setProperty(ACCESS_EXTERNAL_DTD, "");
+            } catch (SAXNotRecognizedException e) {
+                LOG.log(Level.WARNING, "The property '" + ACCESS_EXTERNAL_DTD + "' is not supported.");
+            } catch (SAXNotSupportedException e) {
+                LOG.log(Level.WARNING, "The property '" + ACCESS_EXTERNAL_DTD + "' is not supported.");
+            }
+
+            try {
+                factory.setProperty(ACCESS_EXTERNAL_SCHEMA, "");
+            } catch (SAXNotRecognizedException e) {
+                LOG.log(Level.WARNING, "The property '" + ACCESS_EXTERNAL_SCHEMA + "' is not supported.");
+            } catch (SAXNotSupportedException e) {
+                LOG.log(Level.WARNING, "The property '" + ACCESS_EXTERNAL_SCHEMA + "' is not supported.");
+            }
+
+            // Xerces (the schema factory typically on the CXF classpath) does not honour the
+            // ACCESS_EXTERNAL_* properties above, so secure processing on its own still lets an
+            // external DTD subset be fetched.  A schema document has no legitimate DOCTYPE use,
+            // so refuse them outright.
+            try {
+                factory.setFeature(DISALLOW_DOCTYPE_DECL_FEATURE, true);
+            } catch (SAXNotRecognizedException e) {
+                LOG.log(Level.WARNING, "The property '" + DISALLOW_DOCTYPE_DECL_FEATURE
+                    + "' is not supported.");
+            } catch (SAXNotSupportedException e) {
+                LOG.log(Level.WARNING, "The property '" + DISALLOW_DOCTYPE_DECL_FEATURE
+                    + "' is not supported.");
+            }
+
             Map<String, byte[]> schemaSourcesMap = new LinkedHashMap<String, byte[]>();
             Map<String, Source> schemaSourcesMap2 = new LinkedHashMap<String, Source>();
 

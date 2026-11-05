@@ -66,6 +66,8 @@ import org.xml.sax.Attributes;
 import org.xml.sax.InputSource;
 import org.xml.sax.Locator;
 import org.xml.sax.SAXException;
+import org.xml.sax.SAXNotRecognizedException;
+import org.xml.sax.SAXNotSupportedException;
 import org.xml.sax.SAXParseException;
 import org.xml.sax.helpers.XMLFilterImpl;
 
@@ -969,6 +971,15 @@ public class JAXBDataBinding implements DataBindingProfile {
                                final OASISCatalogManager catalog,
                                final SchemaCollection schemaCollection) throws ToolException {
         SchemaFactory schemaFact = SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI);
+        try {
+            schemaFact.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, Boolean.TRUE);
+        } catch (SAXNotRecognizedException e) {
+            LOG.log(Level.WARNING, "The property '" + XMLConstants.FEATURE_SECURE_PROCESSING
+                + "' is not supported.");
+        } catch (SAXNotSupportedException e) {
+            LOG.log(Level.WARNING, "The property '" + XMLConstants.FEATURE_SECURE_PROCESSING
+                + "' is not supported.");
+        }
         schemaFact.setResourceResolver(new LSResourceResolver() {
             public LSInput resolveResource(String type,
                                            String namespaceURI,

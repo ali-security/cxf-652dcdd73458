@@ -30,6 +30,9 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLConnection;
 import java.net.URLDecoder;
+import java.security.AccessController;
+import java.security.PrivilegedActionException;
+import java.security.PrivilegedExceptionAction;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.Level;
@@ -160,7 +163,19 @@ public class URIResolver {
                 url = relative.toURL();
 
                 try {
-                    HttpURLConnection huc = (HttpURLConnection)url.openConnection();
+                    // Wrap the network connection in doPrivileged so that callers (including
+                    // user deployments) do not need SocketPermission for the target host.
+                    final HttpURLConnection huc;
+                    try {
+                        huc = AccessController.doPrivileged(
+                            new PrivilegedExceptionAction<HttpURLConnection>() {
+                                public HttpURLConnection run() throws IOException {
+                                    return (HttpURLConnection)url.openConnection();
+                                }
+                            });
+                    } catch (PrivilegedActionException e) {
+                        throw (IOException)e.getException();
+                    }
 
                     String host = SystemPropertyAction.getPropertyOrNull("http.proxyHost");
                     if (host != null) {
