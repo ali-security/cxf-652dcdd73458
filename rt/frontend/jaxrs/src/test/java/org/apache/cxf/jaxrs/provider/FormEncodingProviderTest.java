@@ -32,8 +32,17 @@ import javax.ws.rs.core.Form;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.MultivaluedMap;
 
+import org.apache.cxf.Bus;
+import org.apache.cxf.attachment.AttachmentDeserializer;
+import org.apache.cxf.bus.extension.ExtensionManagerBus;
+import org.apache.cxf.jaxrs.ext.multipart.MultipartBody;
 import org.apache.cxf.jaxrs.impl.MetadataMap;
+import org.apache.cxf.jaxrs.model.ProviderInfo;
 import org.apache.cxf.jaxrs.utils.HttpUtils;
+import org.apache.cxf.jaxrs.utils.InjectionUtils;
+import org.apache.cxf.message.ExchangeImpl;
+import org.apache.cxf.message.Message;
+import org.apache.cxf.message.MessageImpl;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -134,10 +143,68 @@ public class FormEncodingProviderTest extends Assert {
         assertEquals(1,  mvMap.get("bar").size());
         assertEquals(1,  mvMap.get("baz").size());
         assertEquals("Wrong entry for foo", "1 2", mvMap.getFirst("foo"));
-        assertEquals("Wrong entry line for bar", 
+        assertEquals("Wrong entry line for bar",
             HttpUtils.urlDecode("line1%0D%0Aline+2"), mvMap.get("bar").get(0));
         assertEquals("Wrong entry for baz", "4", mvMap.getFirst("baz"));
 
+    }
+
+    @Test
+    public void testWriteMultipartTooLarge() throws Exception {
+        final MultivaluedMap<String, String> headers = new MetadataMap<String, String>();
+        headers.add("Content-Transfer-Encoding", "binary");
+
+        final Bus bus = new ExtensionManagerBus();
+        try {
+            final Message m = new MessageImpl();
+            m.put(AttachmentDeserializer.ATTACHMENT_PART_HEADERS, headers);
+            m.put(Message.CONTENT_TYPE, "multipart/related");
+
+            final ExchangeImpl exchange = new ExchangeImpl();
+            m.setExchange(exchange);
+            exchange.setInMessage(m);
+
+            FormEncodingProvider<MultipartBody> ferp = new FormEncodingProvider<MultipartBody>();
+            ProviderInfo<FormEncodingProvider<MultipartBody>> pi =
+                new ProviderInfo<FormEncodingProvider<MultipartBody>>(ferp, bus);
+            InjectionUtils.injectContextProxies(pi, ferp);
+            InjectionUtils.injectContextFields(ferp, pi, m);
+
+            final byte[] messageBytes = createMessageWithAttachmentOfSize(
+                AttachmentDeserializer.DEFAULT_ATTACHMENT_MAX_SIZE / 3 + 1);
+            ByteArrayInputStream in = new ByteArrayInputStream(messageBytes);
+            m.setContent(InputStream.class, in);
+            try {
+                ferp.readFrom(MultipartBody.class, null, new Annotation[]{},
+                              MediaType.MULTIPART_FORM_DATA_TYPE, null, in);
+                fail("WebApplicationException expected, the attachment exceeds the default max size");
+            } catch (WebApplicationException ex) {
+                assertEquals(413 /* Request Entity Too Large */, ex.getResponse().getStatus());
+            }
+        } finally {
+            bus.shutdown(true);
+        }
+    }
+
+    /**
+     * Creates a multipart/related message whose second part body consists of the given number
+     * of "=3D" sequences (built directly as bytes to avoid large intermediate Strings).
+     */
+    private static byte[] createMessageWithAttachmentOfSize(long chunks) {
+        final byte[] head = ("------=_Part_1\n\nJJJJ\n------=_Part_1\n\n"
+            + "Content-Transfer-Encoding: binary\n\n").getBytes();
+        final byte[] chunk = "=3D".getBytes();
+        final byte[] tail = "\n------=_Part_1\n".getBytes();
+
+        final byte[] messageBytes = new byte[(int)(head.length + chunks * chunk.length + tail.length)];
+        System.arraycopy(head, 0, messageBytes, 0, head.length);
+        int pos = head.length;
+        for (long i = 0; i < chunks; i++) {
+            System.arraycopy(chunk, 0, messageBytes, pos, chunk.length);
+            pos += chunk.length;
+        }
+        System.arraycopy(tail, 0, messageBytes, pos, tail.length);
+        return messageBytes;
     }
     
     @Test

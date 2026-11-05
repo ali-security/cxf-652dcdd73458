@@ -18,11 +18,61 @@
  */
 package org.apache.cxf.attachment;
 
+import org.apache.cxf.io.CacheSizeExceededException;
+import org.apache.cxf.io.CachedOutputStream;
+import org.apache.cxf.message.Message;
+import org.apache.cxf.message.MessageImpl;
+
 import org.junit.Assert;
 import org.junit.Test;
 
 public class AttachmentUtilTest extends Assert {
     
+    @Test
+    public void testStreamedAttachmentMaxSizeAsNumber() throws Exception {
+        Message message = new MessageImpl();
+        message.put(AttachmentDeserializer.ATTACHMENT_MAX_SIZE, Integer.valueOf(10));
+
+        CachedOutputStream bos = new CachedOutputStream();
+        try {
+            AttachmentUtil.setStreamedAttachmentProperties(message, bos);
+            bos.write(new byte[10]);
+            try {
+                bos.write(new byte[1]);
+                fail("CacheSizeExceededException expected, the configured max size is exceeded");
+            } catch (CacheSizeExceededException ex) {
+                // expected
+            }
+        } finally {
+            bos.close();
+        }
+    }
+
+    @Test
+    public void testStreamedAttachmentMaxSizeAsString() throws Exception {
+        Message message = new MessageImpl();
+        message.put(AttachmentDeserializer.ATTACHMENT_MAX_SIZE, "10");
+
+        CachedOutputStream bos = new CachedOutputStream();
+        try {
+            AttachmentUtil.setStreamedAttachmentProperties(message, bos);
+            bos.write(new byte[10]);
+            try {
+                bos.write(new byte[1]);
+                fail("CacheSizeExceededException expected, the configured max size is exceeded");
+            } catch (CacheSizeExceededException ex) {
+                // expected
+            }
+        } finally {
+            bos.close();
+        }
+    }
+
+    @Test
+    public void testDefaultAttachmentMaxSizeValue() {
+        assertEquals(50L * 1024 * 1024, AttachmentDeserializer.DEFAULT_ATTACHMENT_MAX_SIZE);
+    }
+
     @Test
     public void testContendDispositionFileNameNoQuotes() {
         assertEquals("a.txt", 
