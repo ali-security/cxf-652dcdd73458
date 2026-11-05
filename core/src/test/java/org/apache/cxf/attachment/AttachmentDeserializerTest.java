@@ -33,6 +33,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -1078,6 +1079,247 @@ public class AttachmentDeserializerTest extends Assert {
         } catch (HeaderSizeExceededException ex) {
             // expected
         }
+    }
+
+    @Test
+    public void testAttachmentSingleLineHeaderSize() throws Exception {
+        final Random random = new Random();
+
+        StringBuilder sb = new StringBuilder(10000);
+        sb.append("------=_Part_34950_1098328613.1263781527359\r\n");
+        sb.append("Header:").append(createRandomString(random, 500)).append("\r\n");
+        sb.append("Content-Type: text/xml; charset=UTF-8\r\n")
+            .append("Content-Transfer-Encoding: binary\r\n")
+            .append("Content-Id: <318731183421.1263781527359.IBM.WEBSERVICES@auhpap02>\r\n")
+            .append("\r\n")
+            .append("<envelope/>\r\n");
+
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(sb.toString().getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+
+        try {
+            ad.initializeAttachments();
+            fail("Failure expected large header value");
+        } catch (HeaderSizeExceededException ex) {
+            // expected
+        }
+    }
+
+    @Test
+    public void testAttachmentRepeatedHeaderSize() throws Exception {
+        final Random random = new Random();
+
+        StringBuilder sb = new StringBuilder(10000);
+        // Each header line is within the limit, but the combined values are not
+        sb.append("------=_Part_34950_1098328613.1263781527359\r\n");
+        sb.append("Header:").append(createRandomString(random, 200)).append("\r\n");
+        sb.append("Header:").append(createRandomString(random, 200)).append("\r\n");
+        sb.append("Content-Type: text/xml; charset=UTF-8\r\n")
+            .append("Content-Transfer-Encoding: binary\r\n")
+            .append("Content-Id: <318731183421.1263781527359.IBM.WEBSERVICES@auhpap02>\r\n")
+            .append("\r\n")
+            .append("<envelope/>\r\n");
+
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(sb.toString().getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+
+        try {
+            ad.initializeAttachments();
+            fail("Failure expected large header value");
+        } catch (HeaderSizeExceededException ex) {
+            // expected
+        }
+    }
+
+    @Test
+    public void testAttachmentMultiLineHeaderSize() throws Exception {
+        final Random random = new Random();
+
+        StringBuilder sb = new StringBuilder(10000);
+        // Each physical line is within the limit, but the folded header value is not
+        sb.append("------=_Part_34950_1098328613.1263781527359\r\n");
+        sb.append("Header:").append(createRandomString(random, 200)).append("\r\n")
+            .append('\t').append(createRandomString(random, 200)).append("\r\n");
+        sb.append("Content-Type: text/xml; charset=UTF-8\r\n")
+            .append("Content-Transfer-Encoding: binary\r\n")
+            .append("Content-Id: <318731183421.1263781527359.IBM.WEBSERVICES@auhpap02>\r\n")
+            .append("\r\n")
+            .append("<envelope/>\r\n");
+
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(sb.toString().getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+
+        try {
+            ad.initializeAttachments();
+            fail("Failure expected large header value");
+        } catch (HeaderSizeExceededException ex) {
+            // expected
+        }
+    }
+
+    @Test
+    public void testAttachmentManyContinuationLinesHeaderSize() throws Exception {
+        // Many short continuation lines must not be able to build an unbounded header value
+        StringBuilder header = new StringBuilder("X-Header: a");
+        for (int i = 0; i < 10000; i++) {
+            header.append("\r\n\t").append("aaaaaaaaaa");
+        }
+        String message = createMessageWithHeaderLine(header.toString(), false);
+
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        try {
+            ad.initializeAttachments();
+            fail("Failure expected on a folded attachment header exceeding the maximum size");
+        } catch (HeaderSizeExceededException ex) {
+            // expected
+        }
+    }
+
+    @Test
+    public void testAttachmentMultiLineHeaderSizeInAttachmentPart() throws Exception {
+        String header = createHeaderLine(200) + "\r\n\t" + createRandomString(new Random(), 200);
+        String message = createMessageWithHeaderLine(header, true);
+
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+        try {
+            msg.getAttachments().size();
+            fail("Failure expected on a folded attachment header exceeding the maximum size");
+        } catch (HeaderSizeExceededException ex) {
+            // expected
+        }
+    }
+
+    @Test
+    public void testAttachmentRepeatedHeaderSizeInAttachmentPart() throws Exception {
+        String header = createHeaderLine(200) + "\r\n" + createHeaderLine(200);
+        String message = createMessageWithHeaderLine(header, true);
+
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+        try {
+            msg.getAttachments().size();
+            fail("Failure expected on a repeated attachment header exceeding the maximum size");
+        } catch (HeaderSizeExceededException ex) {
+            // expected
+        }
+    }
+
+    @Test
+    public void testAttachmentMultiLineHeaderSizeLimit() throws Exception {
+        // "X-Header: " + 143 chars + CRLF + TAB + 144 chars = exactly the default maximum of 300
+        String header = createHeaderLine(153) + "\r\n\t" + createRandomString(new Random(), 144);
+        String message = createMessageWithHeaderLine(header, false);
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+        assertEquals(1, msg.getAttachments().size());
+
+        @SuppressWarnings("unchecked")
+        Map<String, List<String>> headers =
+            (Map<String, List<String>>)msg.get(AttachmentDeserializer.ATTACHMENT_PART_HEADERS);
+        assertEquals(1, headers.get("X-Header").size());
+        assertEquals(143 + 2 + 1 + 144, headers.get("X-Header").get(0).length());
+
+        // one character more is rejected
+        header = createHeaderLine(153) + "\r\n\t" + createRandomString(new Random(), 145);
+        message = createMessageWithHeaderLine(header, false);
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        ad = new AttachmentDeserializer(msg);
+        try {
+            ad.initializeAttachments();
+            fail("Failure expected on a folded attachment header exceeding the maximum size");
+        } catch (HeaderSizeExceededException ex) {
+            // expected
+        }
+    }
+
+    @Test
+    public void testAttachmentRepeatedHeaderSizeLimit() throws Exception {
+        // two values of 150 chars each = exactly the default maximum of 300
+        String header = createHeaderLine(160) + "\r\n" + createHeaderLine(160);
+        String message = createMessageWithHeaderLine(header, false);
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+        assertEquals(1, msg.getAttachments().size());
+
+        @SuppressWarnings("unchecked")
+        Map<String, List<String>> headers =
+            (Map<String, List<String>>)msg.get(AttachmentDeserializer.ATTACHMENT_PART_HEADERS);
+        assertEquals(2, headers.get("X-Header").size());
+
+        // one character more is rejected
+        header = createHeaderLine(160) + "\r\n" + createHeaderLine(161);
+        message = createMessageWithHeaderLine(header, false);
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        ad = new AttachmentDeserializer(msg);
+        try {
+            ad.initializeAttachments();
+            fail("Failure expected on a repeated attachment header exceeding the maximum size");
+        } catch (HeaderSizeExceededException ex) {
+            // expected
+        }
+    }
+
+    @Test
+    public void testAttachmentRepeatedHeaderSizeConfigured() throws Exception {
+        String header = createHeaderLine(200) + "\r\n" + createHeaderLine(200);
+        String message = createMessageWithHeaderLine(header, true);
+
+        // a larger maximum header size allows the combined values
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        msg.put(AttachmentDeserializer.ATTACHMENT_MAX_HEADER_SIZE, "400");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+        assertEquals(1, msg.getAttachments().size());
+
+        // a smaller maximum header size rejects them
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        msg.put(AttachmentDeserializer.ATTACHMENT_MAX_HEADER_SIZE, Integer.valueOf(379));
+        ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+        try {
+            msg.getAttachments().size();
+            fail("Failure expected on a repeated attachment header exceeding the maximum size");
+        } catch (HeaderSizeExceededException ex) {
+            // expected
+        }
+    }
+
+    private static String createRandomString(Random random, int length) {
+        StringBuilder sb = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            sb.append((char)('a' + random.nextInt(25)));
+        }
+        return sb.toString();
     }
 
     private static String createHeaderLine(int length) {

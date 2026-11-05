@@ -90,16 +90,23 @@ final class AttachmentDeserializerUtil {
                 // there's nothing before it, just call addHeaderLine to add it
                 // to the last header in the headers list
                 if (buffer.length() == 0) {
-                    addHeaderLine(headerLines, line, maxHeadersCount);
+                    addHeaderLine(headerLines, line, maxHeadersCount, maxHeaderLength);
                 } else {
                     // preserve the line break and append the continuation
                     buffer.append("\r\n");
                     buffer.append(line);
+
+                    // the limit applies to the whole (folded) header, not just to each physical line
+                    if (buffer.length() > maxHeaderLength) {
+                        LOG.fine("The attachment header size has exceeded the configured parameter: "
+                            + maxHeaderLength);
+                        throw new HeaderSizeExceededException();
+                    }
                 }
             } else {
                 // if we have a line pending in the buffer, flush it
                 if (buffer.length() > 0) {
-                    addHeaderLine(headerLines, buffer.toString(), maxHeadersCount);
+                    addHeaderLine(headerLines, buffer.toString(), maxHeadersCount, maxHeaderLength);
                     buffer.setLength(0);
                 }
                 // add this to the accumulator
@@ -109,7 +116,7 @@ final class AttachmentDeserializerUtil {
 
         // if we have a line pending in the buffer, flush it
         if (buffer.length() > 0) {
-            addHeaderLine(headerLines, buffer.toString(), maxHeadersCount);
+            addHeaderLine(headerLines, buffer.toString(), maxHeadersCount, maxHeaderLength);
         }
         Map<String, List<String>> heads = new TreeMap<String, List<String>>(String.CASE_INSENSITIVE_ORDER);
         for (String h: headerLines) {
@@ -136,6 +143,16 @@ final class AttachmentDeserializerUtil {
             if (v == null) {
                 v = new ArrayList<String>(1);
                 heads.put(name, v);
+            }
+            // the limit applies to the combined values of a repeated header as well
+            int headerSize = 0;
+            for (String s : v) {
+                headerSize += s.length();
+            }
+            if ((headerSize + value.length()) > maxHeaderLength) {
+                LOG.fine("The attachment header size has exceeded the configured parameter: "
+                    + maxHeaderLength);
+                throw new HeaderSizeExceededException();
             }
             v.add(value);
         }
@@ -176,7 +193,7 @@ final class AttachmentDeserializerUtil {
     }
 
     private static void addHeaderLine(List<String> headers, String line,
-            int maxHeadersCount) throws IOException {
+            int maxHeadersCount, int maxHeaderLength) throws IOException {
         // null lines are a nop
         if (line.length() == 0) {
             return;
@@ -191,6 +208,11 @@ final class AttachmentDeserializerUtil {
             // it's possible that we have a leading blank line.
             if (size > 0) {
                 line = headers.remove(size - 1) + line;
+                if (line.length() > maxHeaderLength) {
+                    LOG.fine("The attachment header size has exceeded the configured parameter: "
+                        + maxHeaderLength);
+                    throw new HeaderSizeExceededException();
+                }
                 headers.add(line);
             }
         } else {
