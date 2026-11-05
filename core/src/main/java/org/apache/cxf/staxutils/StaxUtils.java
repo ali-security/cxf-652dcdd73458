@@ -134,8 +134,12 @@ public final class StaxUtils {
     private static int maxAttributeCount = 500; 
     private static int maxAttributeSize = 64 * 1024; //64K per attribute, likely just "list" will hit
     private static int maxTextLength = 128 * 1024 * 1024;  //128M - more than this should DEFINITLEY use MTOM 
-    private static long maxElementCount = Long.MAX_VALUE;
-    private static long maxXMLCharacters = Long.MAX_VALUE;
+    // The maxElementCount should be aligned with innerElementCountThreshold (MAX_CHILD_ELEMENTS),
+    // the effective default is computed in the static initializer once that threshold is resolved
+    private static long maxElementCount = 100L * 50000;
+    // The maxXMLCharacters should be aligned with maxTextLength (maximum contiguous length of any character
+    // data segment)
+    private static long maxXMLCharacters = 256L * 1024 * 1024; //256M, max length of input document, in chars
     
     private static boolean allowInsecureParser;
     
@@ -154,7 +158,8 @@ public final class StaxUtils {
         maxAttributeCount = getInteger(MAX_ATTRIBUTE_COUNT, maxAttributeCount); 
         maxAttributeSize = getInteger(MAX_ATTRIBUTE_SIZE, maxAttributeSize);
         maxTextLength = getInteger(MAX_TEXT_LENGTH, maxTextLength); 
-        maxElementCount = getLong(MAX_ELEMENT_COUNT, maxElementCount);
+        // The MAX_ELEMENT_COUNT should be aligned with MAX_CHILD_ELEMENTS
+        maxElementCount = getLong(MAX_ELEMENT_COUNT, Math.max(100L * innerElementCountThreshold, 50000L));
         maxXMLCharacters = getLong(MAX_XML_CHARACTERS, maxXMLCharacters);
         
         String s = SystemPropertyAction.getPropertyOrNull(ALLOW_INSECURE_PARSER);

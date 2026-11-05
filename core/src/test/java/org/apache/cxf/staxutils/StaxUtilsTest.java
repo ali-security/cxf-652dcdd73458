@@ -21,14 +21,17 @@ package org.apache.cxf.staxutils;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.Reader;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.io.Writer;
 
 import javax.xml.namespace.QName;
 import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 import javax.xml.stream.XMLStreamWriter;
 import javax.xml.stream.events.XMLEvent;
@@ -362,6 +365,112 @@ public class StaxUtilsTest extends Assert {
             fail("invalid qname in mapping");
         } catch (Exception e) {
             // ignore
+        }
+    }
+
+    @Test
+    public void testDefaultMaxElementCount() throws Exception {
+        // The default org.apache.cxf.stax.maxElementCount is 100 * maxChildElements (50000),
+        // send 130 groups of 40000 children (5.2M elements) so that neither the child nor the
+        // depth limits are hit, only the total element count one
+        StringBuilder group = new StringBuilder("<group>");
+        for (int i = 0; i < 40000; i++) {
+            group.append("<a/>");
+        }
+        group.append("</group>");
+        XMLStreamReader reader = StaxUtils.createXMLStreamReader(
+            new RepeatingReader("<root>", group.toString(), 130, "</root>"));
+        long elements = 0;
+        try {
+            while (reader.hasNext()) {
+                if (reader.next() == XMLStreamReader.START_ELEMENT) {
+                    elements++;
+                }
+            }
+            fail("The default maximum element count should have been enforced");
+        } catch (XMLStreamException ex) {
+            assertTrue(ex.getMessage(), ex.getMessage().contains("Element Count"));
+            assertTrue("Elements read before the limit was hit: " + elements,
+                       elements > 100L * 50000 - 10 && elements <= 100L * 50000);
+        } finally {
+            reader.close();
+        }
+    }
+
+    @Test
+    public void testDefaultMaxXMLCharacters() throws Exception {
+        // The default org.apache.cxf.stax.maxXMLCharacters is 256M characters, send ~270M characters
+        // as 33000 elements carrying 8K of text each so that no other limit is hit
+        StringBuilder element = new StringBuilder("<a>");
+        for (int i = 0; i < 8189; i++) {
+            element.append('x');
+        }
+        element.append("</a>");
+        XMLStreamReader reader = StaxUtils.createXMLStreamReader(
+            new RepeatingReader("<root>", element.toString(), 33000, "</root>"));
+        try {
+            while (reader.hasNext()) {
+                reader.next();
+            }
+            fail("The default maximum number of XML characters should have been enforced");
+        } catch (XMLStreamException ex) {
+            assertTrue(ex.getMessage(), ex.getMessage().contains(String.valueOf(256L * 1024 * 1024)));
+        } finally {
+            reader.close();
+        }
+    }
+
+    /**
+     * Streams prefix + count * unit + suffix without holding the whole document in memory.
+     */
+    private static final class RepeatingReader extends Reader {
+        private final String unit;
+        private final String suffix;
+        private int remaining;
+        private boolean suffixSent;
+        private String current;
+        private int pos;
+
+        RepeatingReader(String prefix, String unit, int count, String suffix) {
+            this.unit = unit;
+            this.suffix = suffix;
+            this.remaining = count;
+            this.current = prefix;
+        }
+
+        private boolean advance() {
+            if (remaining > 0) {
+                remaining--;
+                current = unit;
+            } else if (!suffixSent) {
+                suffixSent = true;
+                current = suffix;
+            } else {
+                return false;
+            }
+            pos = 0;
+            return true;
+        }
+
+        @Override
+        public int read(char[] cbuf, int off, int len) throws IOException {
+            if (len == 0) {
+                return 0;
+            }
+            while (pos >= current.length()) {
+                if (!advance()) {
+                    return -1;
+                }
+            }
+            int n = Math.min(len, current.length() - pos);
+            current.getChars(pos, pos + n, cbuf, off);
+            pos += n;
+            return n;
+        }
+
+        @Override
+        public void close() throws IOException {
+            // nothing to release
         }
     }
 }
