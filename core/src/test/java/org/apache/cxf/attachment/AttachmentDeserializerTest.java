@@ -32,6 +32,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -655,6 +656,180 @@ public class AttachmentDeserializerTest extends Assert {
         }
         assertEquals(1249, count);
         assertEquals(-1, ins.read(new byte[1000], 100, 600));
+    }
+
+    @Test
+    public void testManyAttachmentHeaders() throws Exception {
+        StringBuilder sb = new StringBuilder(10000);
+        // Add many attachment headers
+        sb.append("------=_Part_34950_1098328613.1263781527359\n");
+        for (int i = 0; i < 1000; i++) {
+            sb.append("Header-").append(i).append(": foo").append(i).append('\n');
+        }
+        sb.append("Content-Type: text/xml; charset=UTF-8\n")
+            .append("Content-Transfer-Encoding: binary\n")
+            .append("Content-Id: <318731183421.1263781527359.IBM.WEBSERVICES@auhpap02>\n")
+            .append('\n')
+            .append("<envelope/>\n");
+
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(sb.toString().getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+
+        try {
+            ad.initializeAttachments();
+            fail("Failure expected on too many attachment headers");
+        } catch (IOException ex) {
+            assertEquals("The attachment contains more headers than are permitted", ex.getMessage());
+        }
+    }
+
+    @Test
+    public void testManyAttachmentRepeatedHeaders() throws Exception {
+        StringBuilder sb = new StringBuilder(10000);
+        // Add many attachment headers
+        sb.append("------=_Part_34950_1098328613.1263781527359\n");
+        for (int h = 1; h <= 6; h++) {
+            for (int i = 0; i < 100; i++) {
+                sb.append("Header").append(h).append(": ").append(i).append('\n');
+            }
+        }
+        sb.append("Content-Type: text/xml; charset=UTF-8\n")
+            .append("Content-Transfer-Encoding: binary\n")
+            .append("Content-Id: <318731183421.1263781527359.IBM.WEBSERVICES@auhpap02>\n")
+            .append('\n')
+            .append("<envelope/>\n");
+
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(sb.toString().getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+
+        try {
+            ad.initializeAttachments();
+            fail("Failure expected on too many attachment headers");
+        } catch (IOException ex) {
+            assertEquals("The attachment contains more headers than are permitted", ex.getMessage());
+        }
+    }
+
+    @Test
+    public void testManyAttachmentHeadersInAttachmentPart() throws Exception {
+        StringBuilder sb = new StringBuilder(10000);
+        sb.append("------=_Part_34950_1098328613.1263781527359\n")
+            .append("Content-Type: text/xml; charset=UTF-8\n")
+            .append("Content-Transfer-Encoding: binary\n")
+            .append("Content-Id: <318731183421.1263781527359.IBM.WEBSERVICES@auhpap02>\n")
+            .append('\n')
+            .append("<envelope/>\n")
+            .append("------=_Part_34950_1098328613.1263781527359\n");
+        // Add many headers to the (non-root) attachment part
+        for (int i = 0; i < 1000; i++) {
+            sb.append("Header").append(": ").append(i).append('\n');
+        }
+        sb.append("Content-Type: text/xml\n")
+            .append("Content-Transfer-Encoding: binary\n")
+            .append("Content-Id: <b86a5f2d-e7af-4e5e-b71a-9f6f2307cab0>\n")
+            .append('\n')
+            .append("<message>\n")
+            .append("------=_Part_34950_1098328613.1263781527359--");
+
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(sb.toString().getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+
+        try {
+            msg.getAttachments().size();
+            fail("Failure expected on too many attachment headers");
+        } catch (RuntimeException ex) {
+            assertThat(ex.getCause(), instanceOf(IOException.class));
+            assertEquals("The attachment contains more headers than are permitted",
+                         ex.getCause().getMessage());
+        }
+    }
+
+    @Test
+    public void testAttachmentHeadersMaxCount() throws Exception {
+        // 7 custom headers + 3 standard headers = 10 header lines
+        String message = createMessageWithHeaders(7);
+
+        // exactly at the configured limit
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        msg.put(AttachmentDeserializer.ATTACHMENT_HEADERS_MAX_COUNT, "10");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+        assertEquals(1, msg.getAttachments().size());
+
+        // one header line above the configured limit (String value)
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        msg.put(AttachmentDeserializer.ATTACHMENT_HEADERS_MAX_COUNT, "9");
+        ad = new AttachmentDeserializer(msg);
+        try {
+            ad.initializeAttachments();
+            fail("Failure expected on too many attachment headers");
+        } catch (IOException ex) {
+            assertEquals("The attachment contains more headers than are permitted", ex.getMessage());
+        }
+
+        // one header line above the configured limit (Integer value)
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        msg.put(AttachmentDeserializer.ATTACHMENT_HEADERS_MAX_COUNT, Integer.valueOf(9));
+        ad = new AttachmentDeserializer(msg);
+        try {
+            ad.initializeAttachments();
+            fail("Failure expected on too many attachment headers");
+        } catch (IOException ex) {
+            assertEquals("The attachment contains more headers than are permitted", ex.getMessage());
+        }
+    }
+
+    @Test
+    public void testAttachmentHeadersMaxCountIncreased() throws Exception {
+        // 1000 custom headers + 3 standard headers, above the default limit
+        String message = createMessageWithHeaders(1000);
+
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        msg.put(AttachmentDeserializer.ATTACHMENT_HEADERS_MAX_COUNT, Integer.valueOf(2000));
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+
+        @SuppressWarnings("unchecked")
+        Map<String, List<String>> headers =
+            (Map<String, List<String>>)msg.get(AttachmentDeserializer.ATTACHMENT_PART_HEADERS);
+        assertEquals(1003, headers.size());
+        assertEquals(1, msg.getAttachments().size());
+    }
+
+    private static String createMessageWithHeaders(int count) {
+        StringBuilder sb = new StringBuilder(10000);
+        sb.append("------=_Part_34950_1098328613.1263781527359\n");
+        for (int i = 0; i < count; i++) {
+            sb.append("Header-").append(i).append(": foo").append(i).append('\n');
+        }
+        sb.append("Content-Type: text/xml; charset=UTF-8\n")
+            .append("Content-Transfer-Encoding: binary\n")
+            .append("Content-Id: <318731183421.1263781527359.IBM.WEBSERVICES@auhpap02>\n")
+            .append('\n')
+            .append("<envelope/>\n")
+            .append("------=_Part_34950_1098328613.1263781527359\n")
+            .append("Content-Type: text/xml\n")
+            .append("Content-Transfer-Encoding: binary\n")
+            .append("Content-Id: <b86a5f2d-e7af-4e5e-b71a-9f6f2307cab0>\n")
+            .append('\n')
+            .append("<message>\n")
+            .append("------=_Part_34950_1098328613.1263781527359--");
+        return sb.toString();
     }
 
     @Test
