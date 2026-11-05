@@ -23,6 +23,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PushbackInputStream;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -32,6 +36,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import javax.activation.DataSource;
+import javax.activation.URLDataSource;
 import javax.xml.parsers.SAXParser;
 import javax.xml.parsers.SAXParserFactory;
 
@@ -48,6 +53,8 @@ import org.apache.cxf.message.XMLMessage;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+
+import static org.hamcrest.CoreMatchers.instanceOf;
 
 public class AttachmentDeserializerTest extends Assert {
     
@@ -648,6 +655,67 @@ public class AttachmentDeserializerTest extends Assert {
         }
         assertEquals(1249, count);
         assertEquals(-1, ins.read(new byte[1000], 100, 600));
+    }
+
+    @Test
+    public void testCXF8706() {
+        final DataSource ds = AttachmentUtil
+            .getAttachmentDataSource("cid:http://image.com/1.gif", Collections.<Attachment>emptyList());
+        assertThat(ds, instanceOf(LazyDataSource.class));
+    }
+
+    @Test
+    public void testCXF8706followUrl() {
+        System.setProperty(AttachmentUtil.ATTACHMENT_XOP_FOLLOW_URLS_PROPERTY, "true");
+        try {
+            final DataSource ds = AttachmentUtil
+                .getAttachmentDataSource("cid:http://image.com/1.gif", Collections.<Attachment>emptyList());
+            assertThat(ds, instanceOf(URLDataSource.class));
+        } finally {
+            System.clearProperty(AttachmentUtil.ATTACHMENT_XOP_FOLLOW_URLS_PROPERTY);
+        }
+    }
+
+    @Test
+    public void testCXF8706PlainUrlHrefIsNotFollowed() {
+        // <xop:Include href='http://...'/> must never be resolved as a remote URL
+        DataSource ds = AttachmentUtil
+            .getAttachmentDataSource("http://image.com/1.gif", Collections.<Attachment>emptyList());
+        assertThat(ds, instanceOf(LazyDataSource.class));
+
+        ds = AttachmentUtil
+            .getAttachmentDataSource("file:///etc/passwd", Collections.<Attachment>emptyList());
+        assertThat(ds, instanceOf(LazyDataSource.class));
+    }
+
+    @Test
+    public void testCXF8706NoConnectionToXopHrefUrl() throws Exception {
+        final ServerSocket server = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"));
+        try {
+            server.setSoTimeout(2000);
+            final DataSource ds = AttachmentUtil.getAttachmentDataSource(
+                "http://127.0.0.1:" + server.getLocalPort() + "/ssrf", Collections.<Attachment>emptyList());
+            Thread reader = new Thread() {
+                public void run() {
+                    try {
+                        ds.getInputStream().close();
+                    } catch (Exception e) {
+                        // expected: the href does not match any attachment
+                    }
+                }
+            };
+            reader.setDaemon(true);
+            reader.start();
+            try {
+                Socket s = server.accept();
+                s.close();
+                fail("The xop:Include href URL must not be fetched");
+            } catch (SocketTimeoutException e) {
+                // expected: no outbound connection was made
+            }
+        } finally {
+            server.close();
+        }
     }
 }
 
