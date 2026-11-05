@@ -26,8 +26,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.logging.Logger;
+
+import org.apache.cxf.common.logging.LogUtils;
 
 final class AttachmentDeserializerUtil {
+    /* Keep the log under AttachmentDeserializer */
+    private static final Logger LOG = LogUtils.getL7dLogger(AttachmentDeserializer.class);
 
     private AttachmentDeserializerUtil() {
     }
@@ -71,12 +76,13 @@ final class AttachmentDeserializerUtil {
         return false;
     }
 
-    static Map<String, List<String>> loadPartHeaders(InputStream in, int maxHeadersCount) throws IOException {
+    static Map<String, List<String>> loadPartHeaders(InputStream in, int maxHeaderLength,
+            int maxHeadersCount) throws IOException {
         List<String> headerLines = new ArrayList<String>(10);
         StringBuffer buffer = new StringBuffer(128);
         String line;
         // loop until we hit the end or a null line
-        while ((line = readLine(in)) != null) {
+        while ((line = readLine(in, maxHeaderLength)) != null) {
             // lines beginning with white space get special handling
             if (line.startsWith(" ") || line.startsWith("\t")) {
                 // this gets handled using the logic defined by
@@ -136,7 +142,7 @@ final class AttachmentDeserializerUtil {
         return heads;
     }
 
-    private static String readLine(InputStream in) throws IOException {
+    private static String readLine(InputStream in, int maxHeaderLength) throws IOException {
         StringBuffer buffer = new StringBuffer(128);
 
         int c;
@@ -152,6 +158,12 @@ final class AttachmentDeserializerUtil {
             } else {
                 // just add to the buffer
                 buffer.append((char)c);
+            }
+
+            if (buffer.length() > maxHeaderLength) {
+                LOG.fine("The attachment header size has exceeded the configured parameter: "
+                    + maxHeaderLength);
+                throw new HeaderSizeExceededException();
             }
         }
 

@@ -95,7 +95,7 @@ public class Attachment {
         headers.putSingle("Content-Type", "application/octet-stream");
     }
     
-    Attachment(MultivaluedMap<String, String> headers, DataHandler handler, Object object) {
+    public Attachment(MultivaluedMap<String, String> headers, DataHandler handler, Object object) {
         this.headers = headers;
         this.handler = handler;
         this.object = object;

@@ -931,6 +931,147 @@ public class AttachmentDeserializerTest extends Assert {
         assertEquals(1, msg.getAttachments().size());
     }
 
+    @Test
+    public void testAttachmentHeaderSize() throws Exception {
+        // A very large Content-Disposition header in the root part must be rejected
+        StringBuilder cd = new StringBuilder("Content-Disposition: form-data;");
+        for (int i = 0; i < 10000; i++) {
+            cd.append("aaaaaaaaaa");
+        }
+        String message = createMessageWithHeaderLine(cd.toString(), false);
+
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        try {
+            ad.initializeAttachments();
+            fail("Failure expected on an attachment header exceeding the maximum size");
+        } catch (HeaderSizeExceededException ex) {
+            // expected
+        }
+    }
+
+    @Test
+    public void testAttachmentHeaderSizeInAttachmentPart() throws Exception {
+        // A very large header in a (non-root) attachment part must be rejected
+        StringBuilder cd = new StringBuilder("Content-Disposition: attachment; filename=");
+        for (int i = 0; i < 10000; i++) {
+            cd.append("aaaaaaaaaa");
+        }
+        String message = createMessageWithHeaderLine(cd.toString(), true);
+
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+        try {
+            msg.getAttachments().size();
+            fail("Failure expected on an attachment header exceeding the maximum size");
+        } catch (HeaderSizeExceededException ex) {
+            // expected
+        }
+    }
+
+    @Test
+    public void testAttachmentHeaderSizeDefaultLimit() throws Exception {
+        assertEquals(300, AttachmentDeserializer.DEFAULT_MAX_HEADER_SIZE);
+
+        // a header line of exactly the default maximum size is accepted
+        String message = createMessageWithHeaderLine(createHeaderLine(300), false);
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+        assertEquals(1, msg.getAttachments().size());
+
+        // one character more is rejected
+        message = createMessageWithHeaderLine(createHeaderLine(301), false);
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        ad = new AttachmentDeserializer(msg);
+        try {
+            ad.initializeAttachments();
+            fail("Failure expected on an attachment header exceeding the maximum size");
+        } catch (HeaderSizeExceededException ex) {
+            // expected
+        }
+    }
+
+    @Test
+    public void testAttachmentHeaderSizeConfigured() throws Exception {
+        String message = createMessageWithHeaderLine(createHeaderLine(350), true);
+
+        // a larger maximum header size can be configured (String value)
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        msg.put(AttachmentDeserializer.ATTACHMENT_MAX_HEADER_SIZE, "400");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+        assertEquals(1, msg.getAttachments().size());
+
+        // a larger maximum header size can be configured (Integer value)
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        msg.put(AttachmentDeserializer.ATTACHMENT_MAX_HEADER_SIZE, Integer.valueOf(400));
+        ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+        assertEquals(1, msg.getAttachments().size());
+
+        // a smaller maximum header size can be configured
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        msg.put(AttachmentDeserializer.ATTACHMENT_MAX_HEADER_SIZE, "349");
+        ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+        try {
+            msg.getAttachments().size();
+            fail("Failure expected on an attachment header exceeding the maximum size");
+        } catch (HeaderSizeExceededException ex) {
+            // expected
+        }
+    }
+
+    private static String createHeaderLine(int length) {
+        StringBuilder sb = new StringBuilder(length);
+        sb.append("X-Header: ");
+        while (sb.length() < length) {
+            sb.append('a');
+        }
+        return sb.toString();
+    }
+
+    private static String createMessageWithHeaderLine(String headerLine, boolean inAttachmentPart) {
+        // CRLF line endings, so the header line reaches the parser with its exact length
+        StringBuilder sb = new StringBuilder(headerLine.length() + 1000);
+        sb.append("------=_Part_34950_1098328613.1263781527359\r\n");
+        if (!inAttachmentPart) {
+            sb.append(headerLine).append("\r\n");
+        }
+        sb.append("Content-Type: text/xml; charset=UTF-8\r\n")
+            .append("Content-Transfer-Encoding: binary\r\n")
+            .append("Content-Id: <318731183421.1263781527359.IBM.WEBSERVICES@auhpap02>\r\n")
+            .append("\r\n")
+            .append("<envelope/>\r\n")
+            .append("------=_Part_34950_1098328613.1263781527359\r\n");
+        if (inAttachmentPart) {
+            sb.append(headerLine).append("\r\n");
+        }
+        sb.append("Content-Type: text/xml\r\n")
+            .append("Content-Transfer-Encoding: binary\r\n")
+            .append("Content-Id: <b86a5f2d-e7af-4e5e-b71a-9f6f2307cab0>\r\n")
+            .append("\r\n")
+            .append("<message>\r\n")
+            .append("------=_Part_34950_1098328613.1263781527359--");
+        return sb.toString();
+    }
+
     private static String createMessageWithHeaders(int count) {
         StringBuilder sb = new StringBuilder(10000);
         sb.append("------=_Part_34950_1098328613.1263781527359\n");

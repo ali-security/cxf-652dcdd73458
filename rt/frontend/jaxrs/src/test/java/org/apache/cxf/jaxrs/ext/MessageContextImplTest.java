@@ -19,10 +19,14 @@
 
 package org.apache.cxf.jaxrs.ext;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+
 import javax.servlet.ServletConfig;
 import javax.servlet.ServletContext;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.Application;
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.Request;
@@ -32,7 +36,9 @@ import javax.ws.rs.ext.ContextResolver;
 import javax.ws.rs.ext.Providers;
 import javax.xml.bind.JAXBContext;
 
+import org.apache.cxf.attachment.AttachmentDeserializer;
 import org.apache.cxf.endpoint.Endpoint;
+import org.apache.cxf.jaxrs.ext.multipart.MultipartBody;
 import org.apache.cxf.jaxrs.impl.HttpHeadersImpl;
 import org.apache.cxf.jaxrs.impl.HttpServletResponseFilter;
 import org.apache.cxf.jaxrs.impl.ProvidersImpl;
@@ -52,6 +58,8 @@ import org.junit.Assert;
 import org.junit.Test;
 
 public class MessageContextImplTest extends Assert {
+
+    private static final String LARGE_NAME = createLargeName();
 
     @Test
     public void testGetProperty() {
@@ -168,6 +176,91 @@ public class MessageContextImplTest extends Assert {
         assertNull(mc.getContext(Message.class));
     }
     
+    @Test
+    public void testAttachmentHeaderSizeExceeded() throws Exception {
+        Message m = createMultipartMessage(createLargeHeaderMultipart());
+        MessageContext mc = new MessageContextImpl(m);
+        try {
+            mc.get(MultipartBody.INBOUND_MESSAGE_ATTACHMENTS);
+            fail("Failure expected on an attachment header exceeding the maximum size");
+        } catch (WebApplicationException ex) {
+            assertEquals(413, ex.getResponse().getStatus());
+        }
+    }
+
+    @Test
+    public void testAttachmentHeaderSizeConfigured() throws Exception {
+        Message m = createMultipartMessage(createLargeHeaderMultipart());
+        m.put(AttachmentDeserializer.ATTACHMENT_MAX_HEADER_SIZE, "2000");
+        MessageContext mc = new MessageContextImpl(m);
+        MultipartBody body = (MultipartBody)mc.get(MultipartBody.INBOUND_MESSAGE_ATTACHMENTS);
+        assertEquals(LARGE_NAME, body.getRootAttachment().getContentDisposition().getParameter("name"));
+    }
+
+    @Test
+    public void testEmbeddedAttachmentHeaderSizeExceeded() throws Exception {
+        Message m = createEmbeddedMultipartMessage(createLargeHeaderMultipart());
+        MessageContext mc = new MessageContextImpl(m);
+        try {
+            mc.get(MultipartBody.INBOUND_MESSAGE_ATTACHMENTS + ".embedded");
+            fail("Failure expected on an attachment header exceeding the maximum size");
+        } catch (WebApplicationException ex) {
+            assertEquals(413, ex.getResponse().getStatus());
+        }
+    }
+
+    @Test
+    public void testEmbeddedAttachmentHeaderSizeConfigured() throws Exception {
+        // the configured maximum header size is propagated to the embedded multipart
+        Message m = createEmbeddedMultipartMessage(createLargeHeaderMultipart());
+        m.put(AttachmentDeserializer.ATTACHMENT_MAX_HEADER_SIZE, "2000");
+        MessageContext mc = new MessageContextImpl(m);
+        MultipartBody body =
+            (MultipartBody)mc.get(MultipartBody.INBOUND_MESSAGE_ATTACHMENTS + ".embedded");
+        assertEquals(LARGE_NAME, body.getRootAttachment().getContentDisposition().getParameter("name"));
+    }
+
+    private static String createLargeName() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 100; i++) {
+            sb.append("aaaaaaaaaa");
+        }
+        return sb.toString();
+    }
+
+    private static byte[] createLargeHeaderMultipart() throws Exception {
+        StringBuilder sb = new StringBuilder();
+        sb.append("--boundary\r\n")
+            .append("Content-Type: text/plain\r\n")
+            .append("Content-ID: <root>\r\n")
+            .append("Content-Disposition: form-data; name=\"").append(LARGE_NAME).append("\"\r\n")
+            .append("\r\n")
+            .append("hello\r\n")
+            .append("--boundary--\r\n");
+        return sb.toString().getBytes("UTF-8");
+    }
+
+    private static Message createMultipartMessage(byte[] content) {
+        Message m = new MessageImpl();
+        Exchange e = new ExchangeImpl();
+        m.setExchange(e);
+        e.setInMessage(m);
+        m.put(Message.CONTENT_TYPE, "multipart/mixed; boundary=\"boundary\"");
+        m.setContent(InputStream.class, new ByteArrayInputStream(content));
+        return m;
+    }
+
+    private static Message createEmbeddedMultipartMessage(byte[] content) {
+        Message m = new MessageImpl();
+        Exchange e = new ExchangeImpl();
+        m.setExchange(e);
+        e.setInMessage(m);
+        m.put("org.apache.cxf.multipart.embedded", Boolean.TRUE);
+        m.put("org.apache.cxf.multipart.embedded.ctype", "multipart/mixed; boundary=\"boundary\"");
+        m.put("org.apache.cxf.multipart.embedded.input", new ByteArrayInputStream(content));
+        return m;
+    }
+
     private Message createMessage() {
         ProviderFactory factory = ServerProviderFactory.getInstance();
         Message m = new MessageImpl();

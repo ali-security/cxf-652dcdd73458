@@ -45,6 +45,7 @@ import javax.ws.rs.ext.Providers;
 import org.apache.cxf.attachment.AttachmentDeserializer;
 import org.apache.cxf.attachment.AttachmentImpl;
 import org.apache.cxf.attachment.AttachmentUtil;
+import org.apache.cxf.attachment.HeaderSizeExceededException;
 import org.apache.cxf.endpoint.Endpoint;
 import org.apache.cxf.helpers.CastUtils;
 import org.apache.cxf.interceptor.AttachmentOutInterceptor;
@@ -76,6 +77,8 @@ public class MessageContextImpl implements MessageContext {
                 return createAttachments(key.toString());
             } catch (CacheSizeExceededException e) {
                 throw new WebApplicationException(413);
+            } catch (HeaderSizeExceededException e) {
+                throw new WebApplicationException(e, 413);
             }
         }
         if (keyValue.equals("WRITE-" + Message.ATTACHMENTS)) {
@@ -256,6 +259,8 @@ public class MessageContextImpl implements MessageContext {
                 m.getExchange().getInMessage().get(AttachmentDeserializer.ATTACHMENT_MEMORY_THRESHOLD));
             inMessage.put(AttachmentDeserializer.ATTACHMENT_MAX_SIZE,
                 m.getExchange().getInMessage().get(AttachmentDeserializer.ATTACHMENT_MAX_SIZE));
+            inMessage.put(AttachmentDeserializer.ATTACHMENT_MAX_HEADER_SIZE,
+                m.getExchange().getInMessage().get(AttachmentDeserializer.ATTACHMENT_MAX_HEADER_SIZE));
             inMessage.setContent(InputStream.class, 
                 m.getExchange().getInMessage().get("org.apache.cxf.multipart.embedded.input"));
             inMessage.put(Message.CONTENT_TYPE, 
