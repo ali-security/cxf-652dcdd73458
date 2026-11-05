@@ -50,6 +50,12 @@ public class AttachmentDeserializer {
     public static final String ATTACHMENT_MAX_SIZE = "attachment-max-size";
 
     /**
+     * The maximum number of attachments permitted in a message. The default is 50.
+     */
+    public static final String ATTACHMENT_MAX_COUNT = "attachment-max-count";
+    public static final int DEFAULT_ATTACHMENT_MAX_COUNT = 50;
+
+    /**
      * The maximum number of attachment headers permitted in a message. The default is 500.
      */
     public static final String ATTACHMENT_HEADERS_MAX_COUNT = "attachment-headers-max-count";
@@ -103,7 +109,9 @@ public class AttachmentDeserializer {
     public void initializeAttachments() throws IOException {
         initializeRootMessage();
 
-        attachments = new LazyAttachmentCollection(this);
+        int maxAttachmentCount = getContextualInteger(message, ATTACHMENT_MAX_COUNT,
+                                                      DEFAULT_ATTACHMENT_MAX_COUNT);
+        attachments = new LazyAttachmentCollection(this, maxAttachmentCount);
         message.setAttachments(attachments);
     }
 
